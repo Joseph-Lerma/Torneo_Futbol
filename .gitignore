@@ -1,0 +1,15 @@
+# Java / Maven / Gradle
+target/
+build/
+.gradle/
+# Node / Angular
+node_modules/
+dist/
+.angular/
+# IDEs
+.idea/
+*.iml
+.vscode/
+# Secretos y sistema
+.env
+.DS_Store
