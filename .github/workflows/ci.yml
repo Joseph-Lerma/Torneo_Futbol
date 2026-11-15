@@ -1,0 +1,120 @@
+# T-02 (SCRUM-20): integracion continua del monorepo.
+# Cada push y cada pull request compila y ejecuta las pruebas.
+# Cada parte se ejecuta solo si su proyecto ya existe en la rama, asi el
+# pipeline funciona aunque frontend/ o los servicios todavia esten vacios.
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [develop, main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  servicios:
+    name: Servicio (${{ matrix.servicio }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        servicio: [torneo-service, estadisticas-service]
+    defaults:
+      run:
+        working-directory: ${{ matrix.servicio }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detectar proyecto Maven
+        id: detectar
+        working-directory: .
+        run: |
+          if [ -f "${{ matrix.servicio }}/pom.xml" ]; then
+            echo "existe=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "existe=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::${{ matrix.servicio }} todavia no tiene pom.xml, se omite."
+          fi
+
+      - name: Configurar Java 21
+        if: steps.detectar.outputs.existe == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: ${{ matrix.servicio }}/pom.xml
+
+      # verify compila, ejecuta las pruebas (Testcontainers usa el Docker del runner) y empaqueta
+      - name: Compilar y probar
+        if: steps.detectar.outputs.existe == 'true'
+        run: |
+          chmod +x mvnw
+          ./mvnw -B -ntp verify
+
+      - name: Guardar reportes de pruebas
+        if: always() && steps.detectar.outputs.existe == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: reportes-${{ matrix.servicio }}
+          path: ${{ matrix.servicio }}/target/surefire-reports/
+          if-no-files-found: ignore
+
+  frontend:
+    name: Frontend (Angular)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detectar proyecto Angular
+        id: detectar
+        working-directory: .
+        run: |
+          if [ -f frontend/package.json ]; then
+            echo "existe=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "existe=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::frontend/ todavia no tiene package.json, se omite."
+          fi
+          if [ -f frontend/pnpm-lock.yaml ]; then echo "gestor=pnpm" >> "$GITHUB_OUTPUT"; else echo "gestor=npm" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Configurar Node 22
+        if: steps.detectar.outputs.existe == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Instalar dependencias (pnpm)
+        if: steps.detectar.outputs.existe == 'true' && steps.detectar.outputs.gestor == 'pnpm'
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+
+      - name: Instalar dependencias (npm)
+        if: steps.detectar.outputs.existe == 'true' && steps.detectar.outputs.gestor == 'npm'
+        run: npm ci || npm install
+
+      - name: Compilar
+        if: steps.detectar.outputs.existe == 'true'
+        run: ${{ steps.detectar.outputs.gestor }} run build
+
+  # Unico check que se marca como obligatorio en la proteccion de ramas:
+  # queda en verde solo si todos los trabajos anteriores pasaron.
+  ci-ok:
+    name: CI OK
+    if: always()
+    needs: [servicios, frontend]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verificar resultado
+        run: |
+          if [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" = "true" ]; then
+            echo "Algun trabajo del CI fallo."; exit 1
+          fi
+          echo "Todo el CI esta en verde."
