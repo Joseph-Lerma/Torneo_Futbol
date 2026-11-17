@@ -1,0 +1,115 @@
+name: torneo-futbol
+
+services:
+  torneo-db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: torneo_db
+      POSTGRES_USER: torneo
+      POSTGRES_PASSWORD: torneo
+    volumes:
+      - torneo-db-data:/var/lib/postgresql/data
+    networks: [torneo-red]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U torneo -d torneo_db"]
+      interval: 5s
+      retries: 10
+
+  estadisticas-db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: estadisticas_db
+      POSTGRES_USER: estadisticas
+      POSTGRES_PASSWORD: estadisticas
+    volumes:
+      - estadisticas-db-data:/var/lib/postgresql/data
+    networks: [torneo-red]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U estadisticas -d estadisticas_db"]
+      interval: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    ports:
+      - "15672:15672"
+    networks: [torneo-red]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      retries: 10
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.4
+    command: start-dev --import-realm
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+    volumes:
+      - ./keycloak/realm.json:/opt/keycloak/data/import/realm.json:ro
+    ports:
+      - "8080:8080"
+    networks: [torneo-red]
+
+  minio:
+    image: cgr.dev/chainguard/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio12345
+    volumes:
+      - minio-data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    networks: [torneo-red]
+
+  # crea el bucket de escudos y fotos; se reintenta hasta que minio responde
+  minio-bucket:
+    image: cgr.dev/chainguard/minio-client:latest
+    command: mb --ignore-existing local/torneo
+    environment:
+      MC_HOST_local: http://minio:minio12345@minio:9000
+    depends_on: [minio]
+    restart: on-failure
+    networks: [torneo-red]
+
+  torneo-service:
+    build: ../torneo-service
+    environment:
+      DB_URL: jdbc:postgresql://torneo-db:5432/torneo_db
+      DB_USER: torneo
+      DB_PASSWORD: torneo
+      RABBITMQ_HOST: rabbitmq
+    ports:
+      - "8081:8081"
+    networks: [torneo-red]
+    depends_on:
+      torneo-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  estadisticas-service:
+    build: ../estadisticas-service
+    environment:
+      DB_URL: jdbc:postgresql://estadisticas-db:5432/estadisticas_db
+      DB_USER: estadisticas
+      DB_PASSWORD: estadisticas
+      RABBITMQ_HOST: rabbitmq
+    ports:
+      - "8082:8082"
+    networks: [torneo-red]
+    depends_on:
+      estadisticas-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+networks:
+  torneo-red:
+
+volumes:
+  torneo-db-data:
+  estadisticas-db-data:
+  minio-data:

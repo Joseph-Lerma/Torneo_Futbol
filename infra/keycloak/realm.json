@@ -1,0 +1,65 @@
+{
+  "realm": "torneo",
+  "enabled": true,
+  "roles": {
+    "realm": [
+      { "name": "organizador", "description": "Administra el torneo: equipos, calendario y resultados" },
+      { "name": "delegado", "description": "Gestiona los jugadores de su propio equipo" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "torneo-frontend",
+      "name": "Torneo frontend",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": ["http://localhost:4200/*"],
+      "webOrigins": ["http://localhost:4200"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:4200/*"
+      },
+      "protocolMappers": [
+        {
+          "name": "equipo_id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "equipo_id",
+            "claim.name": "equipo_id",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "organizador",
+      "enabled": true,
+      "email": "organizador@torneo.test",
+      "emailVerified": true,
+      "firstName": "Usuario",
+      "lastName": "Organizador",
+      "credentials": [{ "type": "password", "value": "organizador", "temporary": false }],
+      "realmRoles": ["organizador"]
+    },
+    {
+      "username": "delegado",
+      "enabled": true,
+      "email": "delegado@torneo.test",
+      "emailVerified": true,
+      "firstName": "Usuario",
+      "lastName": "Delegado",
+      "attributes": { "equipo_id": ["1"] },
+      "credentials": [{ "type": "password", "value": "delegado", "temporary": false }],
+      "realmRoles": ["delegado"]
+    }
+  ]
+}
